@@ -13,7 +13,7 @@ import {
   FileSpreadsheet,
   Flag,
   FolderPlus,
-  MoreHorizontal,
+  LockKeyhole,
   Pencil,
   Printer,
   Search,
@@ -29,16 +29,22 @@ import {
   buildTimelineSvg,
   createBlankProject,
   createId,
+  createProjectFromTemplate,
   createSampleProject,
   daysBetween,
   formatDate,
   getDate,
+  getProjectDateRange,
   GROUPS,
+  isoWeekNumber,
   parseImportedProject,
   startOfMonth,
   startOfWeek,
+  TIMELINE_TEMPLATES,
   type TimelineItem,
   type TimelineProject,
+  type TimelineTemplate,
+  type TimelineTemplateId,
 } from './timeline'
 import './TimelineEditor.css'
 
@@ -78,26 +84,33 @@ function saveBlob(filename: string, contents: BlobPart, type: string) {
   const link = document.createElement('a')
   link.href = url
   link.download = filename
+  link.hidden = true
+  document.body.append(link)
   link.click()
-  URL.revokeObjectURL(url)
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 function colorForGroup(group: string) {
-  return GROUP_COLORS[group] ?? '#688c83'
+  if (GROUP_COLORS[group]) return GROUP_COLORS[group]
+  const colors = ['#688c83', '#718a65', '#8c739c', '#5487a4', '#c79339', '#ce765f']
+  const hash = [...group].reduce((total, character) => total + character.charCodeAt(0), 0)
+  return colors[hash % colors.length]
 }
 
 function getRange(project: TimelineProject, scale: Scale) {
-  const projectStart = getDate(project.startDate)
-  const projectEnd = getDate(project.endDate)
-  const start = scale === 'week' ? startOfWeek(projectStart) : startOfMonth(projectStart)
-  const last = scale === 'week' ? startOfWeek(projectEnd) : startOfMonth(projectEnd)
+  const projectRange = getProjectDateRange(project)
+  const earliest = getDate(projectRange.startDate)
+  const latest = getDate(projectRange.endDate)
+  const start = scale === 'week' ? startOfWeek(earliest) : startOfMonth(earliest)
+  const last = scale === 'week' ? startOfWeek(latest) : startOfMonth(latest)
   const end = scale === 'week' ? addDays(last, 7) : addMonths(last, 1)
   const periods: { start: Date; label: string; sublabel: string }[] = []
   for (let cursor = new Date(start); cursor < end; cursor = scale === 'week' ? addDays(cursor, 7) : addMonths(cursor, 1)) {
     periods.push({
       start: new Date(cursor),
       label: formatDate(cursor, scale === 'week' ? { month: 'short', day: 'numeric' } : { month: 'short' }),
-      sublabel: scale === 'week' ? `W${String(Math.ceil(cursor.getUTCDate() / 7)).padStart(2, '0')}` : String(cursor.getUTCFullYear()),
+      sublabel: scale === 'week' ? `W${String(isoWeekNumber(cursor)).padStart(2, '0')}` : String(cursor.getUTCFullYear()),
     })
   }
   return { start, end, periods, totalDays: daysBetween(start, end) }
@@ -195,6 +208,36 @@ function ItemEditor({
   )
 }
 
+function TemplatePreview({ template }: { template: TimelineTemplate }) {
+  const colors = ['#5f947b', '#5487a4', '#c79339', '#ce765f', '#718a65', '#8c739c']
+  return <div className={`template-preview preview-${template.id}`} aria-hidden="true">
+    {template.items.length === 0 ? <span className="template-preview-empty"><i /></span> : template.items.slice(0, 5).map((item, index) => {
+      const left = Math.max(3, Math.min(88, (item.startOffset + 16) * 0.62))
+      const width = item.kind === 'milestone' ? 2 : Math.max(8, Math.min(36, item.duration * 0.42))
+      const color = colors[Math.max(0, template.groups.indexOf(item.group)) % colors.length]
+      return <span className="template-track" key={`${item.title}-${index}`}><i className={item.kind === 'milestone' ? 'preview-milestone' : ''} style={{ '--preview-left': `${left}%`, '--preview-width': `${width}%`, '--group-color': color } as CSSProperties} /></span>
+    })}
+  </div>
+}
+
+function TemplatePicker({ onClose, onSelect }: { onClose: () => void; onSelect: (id: TimelineTemplateId) => void }) {
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="template-dialog" role="dialog" aria-modal="true" aria-labelledby="template-dialog-title">
+      <div className="dialog-head">
+        <div><span className="eyebrow">START WITH A PLAN</span><h2 id="template-dialog-title">Choose a template</h2></div>
+        <button className="icon-button quiet" type="button" aria-label="Close templates" onClick={onClose}><X size={18} /></button>
+      </div>
+      <div className="template-grid">
+        {TIMELINE_TEMPLATES.map((template) => <button className="template-card" type="button" key={template.id} onClick={() => onSelect(template.id)}>
+          <TemplatePreview template={template} />
+          <span className="template-card-copy"><strong>{template.name}</strong><span>{template.description}</span><small>{template.groups.length} workstreams · {template.items.length} starter items</small></span>
+          <ChevronRight className="template-card-arrow" size={16} />
+        </button>)}
+      </div>
+    </section>
+  </div>
+}
+
 export default function TimelineEditor() {
   const [initial] = useState(() => {
     const projects = loadProjects()
@@ -208,15 +251,19 @@ export default function TimelineEditor() {
   const [viewMode, setViewMode] = useState<ViewMode>('gantt')
   const [dialogItem, setDialogItem] = useState<TimelineItem | ItemDraft | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [templateOpen, setTemplateOpen] = useState(false)
+  const [pptxExporting, setPptxExporting] = useState(false)
+  const [exportError, setExportError] = useState('')
   const [saveError, setSaveError] = useState(false)
   const [importError, setImportError] = useState('')
   const activeProject = projects.find((project) => project.id === activeId) ?? projects[0]
-  const groups = [...new Set([...GROUPS, ...activeProject.groups])]
+  const groups = [...new Set([...GROUPS, ...activeProject.groups, ...activeProject.items.map((item) => item.group)])]
   const { start: rangeStart, periods, totalDays } = getRange(activeProject, scale)
   const unitWidth = scale === 'month' ? 132 : 116
   const chartWidth = periods.length * unitWidth
   const [today] = useState(() => new Date())
-  const todayOffset = daysBetween(rangeStart, today)
+  const todayDate = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()))
+  const todayOffset = daysBetween(rangeStart, todayDate)
   const todayIsVisible = todayOffset >= 0 && todayOffset <= totalDays
   const taskCount = activeProject.items.filter((item) => item.kind === 'task').length
   const milestoneCount = activeProject.items.filter((item) => item.kind === 'milestone').length
@@ -238,13 +285,16 @@ export default function TimelineEditor() {
     commitProjects(projects.map((project) => project.id === activeId ? { ...update(project), updatedAt: new Date().toISOString() } : project))
   }
 
-  function createProject() {
-    const project = createBlankProject()
+  function createProjectFromGallery(templateId: TimelineTemplateId) {
+    const project = createProjectFromTemplate(templateId)
     commitProjects([project, ...projects])
     setActiveId(project.id)
+    setTemplateOpen(false)
   }
 
   function deleteProject(projectId: string) {
+    const projectToDelete = projects.find((project) => project.id === projectId)
+    if (!projectToDelete || !window.confirm(`Delete "${projectToDelete.name}"? This cannot be undone.`)) return
     if (projects.length === 1) {
       const replacement = createBlankProject()
       commitProjects([replacement])
@@ -290,6 +340,20 @@ export default function TimelineEditor() {
     setMoreOpen(false)
   }
 
+  async function exportPptx() {
+    setMoreOpen(false)
+    setExportError('')
+    setPptxExporting(true)
+    try {
+      const { exportProjectToPptx } = await import('./powerpoint')
+      await exportProjectToPptx(activeProject, filename('pptx'))
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'The PowerPoint file could not be created.')
+    } finally {
+      setPptxExporting(false)
+    }
+  }
+
   function importProject(file?: File) {
     if (!file) return
     setImportError('')
@@ -314,13 +378,13 @@ export default function TimelineEditor() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-lockup"><span className="brand-mark"><ChartGantt size={19} strokeWidth={2.3} /></span><span className="brand-name">daymark<span>.</span></span><span className="free-tag">FREE</span></div>
-        <div className="workspace-label"><span>YOUR WORKSPACE</span><button className="icon-button quiet" type="button" title="Workspace options" aria-label="Workspace options"><MoreHorizontal size={18} /></button></div>
+        <div className="workspace-label"><span>YOUR WORKSPACE</span></div>
         <div className="project-list" aria-label="Your timelines">
           {projects.map((project, index) => <button key={project.id} type="button" className={`project-nav ${project.id === activeId ? 'active' : ''}`} onClick={() => setActiveId(project.id)}>
             <span className={`project-dot dot-${index % 4}`} /><span className="project-nav-text"><strong>{project.name}</strong><small>{project.items.length} items</small></span>{project.id === activeId && <ChevronRight className="project-chevron" size={15} />}
           </button>)}
         </div>
-        <button className="new-project" type="button" onClick={createProject}><FolderPlus size={16} /> New timeline <span>+</span></button>
+        <button className="new-project" type="button" onClick={() => setTemplateOpen(true)}><FolderPlus size={16} /> New timeline <span>+</span></button>
         <div className="sidebar-bottom">
           <div className="storage-note"><span className="storage-icon"><Sparkles size={15} /></span><div><strong>Free, by default</strong><small>Saved on this device</small></div></div>
           <button className="help-link" type="button" onClick={() => window.alert('Daymark keeps your timelines in this browser. Export a JSON backup to move them to another device.')}><CircleHelp size={16} /> Help &amp; storage</button>
@@ -338,6 +402,7 @@ export default function TimelineEditor() {
             <div className="export-wrap">
               <button className="button primary" type="button" onClick={() => setMoreOpen((open) => !open)} aria-expanded={moreOpen}><ArrowDownToLine size={16} /> Export <ChevronDown size={14} /></button>
               {moreOpen && <div className="export-menu" role="menu">
+                <button role="menuitem" type="button" onClick={exportPptx}><ChartGantt size={16} /> PowerPoint (.pptx) <small>Editable slide shapes</small></button>
                 <button role="menuitem" type="button" onClick={exportSvg}><ArrowDownToLine size={16} /> SVG image <small>Vector artwork</small></button>
                 <button role="menuitem" type="button" onClick={exportCsv}><FileSpreadsheet size={16} /> CSV data <small>Spreadsheet-ready</small></button>
                 <button role="menuitem" type="button" onClick={exportJson}><FileJson size={16} /> JSON backup <small>Editable project file</small></button>
@@ -348,10 +413,11 @@ export default function TimelineEditor() {
         </header>
 
         <section className="page-content">
-          {importError && <div className="inline-error" role="alert"><span>{importError}</span><button className="icon-button quiet" type="button" aria-label="Dismiss import error" onClick={() => setImportError('')}><X size={16} /></button></div>}
+          {(importError || exportError) && <div className="inline-error" role="alert"><span>{importError || exportError}</span><button className="icon-button quiet" type="button" aria-label="Dismiss error" onClick={() => { setImportError(''); setExportError('') }}><X size={16} /></button></div>}
+          {pptxExporting && <div className="export-progress" role="status">Preparing editable PowerPoint...</div>}
           <div className="project-heading">
-            <div className="title-wrap"><div className="eyebrow"><span className="eyebrow-line" /> PROJECT TIMELINE <span className="private-chip">PRIVATE</span></div><input className="project-title" aria-label="Timeline name" value={activeProject.name} maxLength={70} onChange={(event) => updateActive((project) => ({ ...project, name: event.target.value }))} /><div className="project-subtitle"><CalendarDays size={15} /> {formatDate(activeProject.startDate, { month: 'short', day: 'numeric', year: 'numeric' })} <span className="date-separator">to</span> {formatDate(activeProject.endDate, { month: 'short', day: 'numeric', year: 'numeric' })}<span className="subtitle-dot" /> Updated just now</div></div>
-            <div className="heading-side"><div className="avatar-stack"><span>JL</span><span>MK</span><button type="button" aria-label="Add collaborator" title="Local timelines are private to this browser">+</button></div><span className="people-label">Just you</span><button className="icon-button border-button" type="button" aria-label="Delete this timeline" title="Delete this timeline" onClick={() => deleteProject(activeProject.id)}><Trash2 size={17} /></button></div>
+            <div className="title-wrap"><div className="eyebrow"><span className="eyebrow-line" /> PROJECT TIMELINE <span className="private-chip">PRIVATE</span></div><input className="project-title" aria-label="Timeline name" value={activeProject.name} maxLength={70} onChange={(event) => updateActive((project) => ({ ...project, name: event.target.value }))} /><div className="project-subtitle"><CalendarDays size={15} /> {formatDate(activeProject.startDate, { month: 'short', day: 'numeric', year: 'numeric' })} <span className="date-separator">to</span> {formatDate(activeProject.endDate, { month: 'short', day: 'numeric', year: 'numeric' })}<span className="subtitle-dot" /> Saved {formatDate(activeProject.updatedAt.slice(0, 10), { month: 'short', day: 'numeric' })}</div></div>
+            <div className="heading-side"><span className="local-plan-badge"><LockKeyhole size={13} /> On this device</span><button className="icon-button border-button" type="button" aria-label="Delete this timeline" title="Delete this timeline" onClick={() => deleteProject(activeProject.id)}><Trash2 size={17} /></button></div>
           </div>
 
           <div className="summary-strip" aria-label="Timeline summary">
@@ -368,7 +434,7 @@ export default function TimelineEditor() {
               <div className="toolbar-divider" />
               <div className="scale-switch" role="group" aria-label="Time scale"><button className={scale === 'week' ? 'selected' : ''} type="button" onClick={() => setScale('week')}>Week</button><button className={scale === 'month' ? 'selected' : ''} type="button" onClick={() => setScale('month')}>Month</button></div>
               <div className="toolbar-spacer" />
-              <button className="today-button" type="button" onClick={() => { const month = startOfMonth(new Date()); updateActive((project) => ({ ...project, startDate: addMonths(month, -1).toISOString().slice(0, 10), endDate: addMonths(month, 5).toISOString().slice(0, 10) })); setScale('month') }}><Clock3 size={15} /> Today</button>
+              <button className="today-button" type="button" onClick={() => { const month = startOfMonth(new Date()); updateActive((project) => ({ ...project, startDate: addMonths(month, -1).toISOString().slice(0, 10), endDate: addDays(addMonths(month, 5), -1).toISOString().slice(0, 10) })); setScale('month') }}><Clock3 size={15} /> Today</button>
               <span className="toolbar-separator" />
               <button className="icon-button zoom-control" type="button" aria-label="Show weeks" title="Show weeks" onClick={() => setScale('week')}><Search size={15} /><span>−</span></button>
               <button className="icon-button zoom-control" type="button" aria-label="Show months" title="Show months" onClick={() => setScale('month')}><Search size={15} /><span>+</span></button>
@@ -376,7 +442,7 @@ export default function TimelineEditor() {
             </div>
 
             <div className="timeline-scroll"><div className="timeline-grid" style={{ '--chart-width': `${chartWidth}px`, '--unit-width': `${unitWidth}px` } as CSSProperties}>
-              <div className="task-head"><span>WORKSTREAM / OWNER</span><button type="button" aria-label="All tasks shown" title="All tasks shown"><Search size={15} /></button></div>
+              <div className="task-head"><span>WORKSTREAM / OWNER</span></div>
               <div className="chart-head"><div className="periods-row" style={{ width: chartWidth }}>{periods.map((period, index) => <div className="period-cell" key={`${period.start.toISOString()}-${index}`}><strong>{period.label}</strong><small>{period.sublabel}</small></div>)}</div></div>
               <div className="task-rows">
                 {visibleItems.length === 0 ? <div className="empty-table"><span className="empty-mark"><ChartGantt size={20} /></span><strong>Your timeline is ready for its first item.</strong><span>Add a task or milestone to start mapping the work.</span><button className="button primary" type="button" onClick={() => setDialogItem(makeDraft(activeProject, 'task'))}>Add your first task <ChevronRight size={15} /></button></div> : visibleItems.map((item) => <button className="task-row" type="button" key={item.id} onClick={() => setDialogItem(item)} aria-label={`Edit ${item.kind}: ${item.title}`}>
@@ -398,7 +464,8 @@ export default function TimelineEditor() {
         </section>
       </main>
       <div className="quick-add"><button type="button" aria-label="Add task" title="Add task" onClick={() => setDialogItem(makeDraft(activeProject, 'task'))}>+</button></div>
-      {dialogItem && <ItemEditor key={'id' in dialogItem ? dialogItem.id : 'new-item'} item={dialogItem} groups={groups} onClose={() => setDialogItem(null)} onSave={saveItem} onDelete={'id' in dialogItem ? () => removeItem(dialogItem.id) : undefined} />}
+      {dialogItem && <ItemEditor key={'id' in dialogItem ? dialogItem.id : 'new-item'} item={dialogItem} groups={groups} onClose={() => setDialogItem(null)} onSave={saveItem} onDelete={'id' in dialogItem ? () => { if (window.confirm(`Delete "${dialogItem.title}"?`)) removeItem(dialogItem.id) } : undefined} />}
+      {templateOpen && <TemplatePicker onClose={() => setTemplateOpen(false)} onSelect={createProjectFromGallery} />}
     </div>
   )
 }

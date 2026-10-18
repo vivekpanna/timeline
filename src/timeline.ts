@@ -1,5 +1,6 @@
 export const GROUPS = ['Research', 'Design', 'Engineering', 'Launch'] as const
 export type ItemKind = 'task' | 'milestone'
+export type TimelineTemplateId = 'product-launch' | 'quarterly-roadmap' | 'swimlane-plan' | 'milestone-map' | 'blank'
 
 export interface TimelineItem {
   id: string
@@ -20,8 +21,97 @@ export interface TimelineProject {
   endDate: string
   groups: string[]
   items: TimelineItem[]
+  templateId?: TimelineTemplateId
   createdAt: string
   updatedAt: string
+}
+
+interface TemplateItem extends Omit<TimelineItem, 'id' | 'startDate' | 'endDate'> {
+  startOffset: number
+  duration: number
+}
+
+export interface TimelineTemplate {
+  id: TimelineTemplateId
+  name: string
+  description: string
+  groups: string[]
+  items: TemplateItem[]
+}
+
+export const TIMELINE_TEMPLATES: TimelineTemplate[] = [
+  {
+    id: 'product-launch',
+    name: 'Product launch',
+    description: 'Move from discovery through build, beta, and launch.',
+    groups: ['Research', 'Design', 'Engineering', 'Launch'],
+    items: [
+      { title: 'Customer interviews', kind: 'task', group: 'Research', owner: 'Jordan Lee', startOffset: -12, duration: 16, progress: 100 },
+      { title: 'Product direction', kind: 'task', group: 'Research', owner: 'Maya K.', startOffset: 4, duration: 18, progress: 70 },
+      { title: 'Experience prototype', kind: 'task', group: 'Design', owner: 'Maya K.', startOffset: 18, duration: 28, progress: 35 },
+      { title: 'Core build', kind: 'task', group: 'Engineering', owner: 'Alex Chen', startOffset: 40, duration: 55, progress: 0 },
+      { title: 'Private beta', kind: 'task', group: 'Launch', owner: 'Jordan Lee', startOffset: 88, duration: 27, progress: 0 },
+      { title: 'Public launch', kind: 'milestone', group: 'Launch', owner: 'Team', startOffset: 126, duration: 0, progress: 0 },
+    ],
+  },
+  {
+    id: 'quarterly-roadmap',
+    name: 'Quarterly roadmap',
+    description: 'Prioritize outcomes across product, growth, and reliability.',
+    groups: ['Customer value', 'Growth', 'Platform', 'Reliability'],
+    items: [
+      { title: 'Self-serve onboarding', kind: 'task', group: 'Customer value', owner: 'Product', startOffset: 2, duration: 48, progress: 20 },
+      { title: 'Usage insights', kind: 'task', group: 'Customer value', owner: 'Data', startOffset: 30, duration: 45, progress: 0 },
+      { title: 'Referral experiment', kind: 'task', group: 'Growth', owner: 'Marketing', startOffset: 12, duration: 28, progress: 50 },
+      { title: 'Regional expansion', kind: 'milestone', group: 'Growth', owner: 'Leadership', startOffset: 92, duration: 0, progress: 0 },
+      { title: 'API performance', kind: 'task', group: 'Platform', owner: 'Engineering', startOffset: 8, duration: 52, progress: 10 },
+      { title: 'Access controls', kind: 'task', group: 'Reliability', owner: 'Security', startOffset: 46, duration: 38, progress: 0 },
+    ],
+  },
+  {
+    id: 'swimlane-plan',
+    name: 'Swimlane delivery',
+    description: 'Coordinate parallel work across teams and handoffs.',
+    groups: ['Web', 'Mobile', 'Data', 'Operations'],
+    items: [
+      { title: 'Interaction design', kind: 'task', group: 'Web', owner: 'Design', startOffset: -4, duration: 22, progress: 100 },
+      { title: 'Web implementation', kind: 'task', group: 'Web', owner: 'Frontend', startOffset: 20, duration: 42, progress: 25 },
+      { title: 'Mobile integration', kind: 'task', group: 'Mobile', owner: 'Apps', startOffset: 31, duration: 47, progress: 0 },
+      { title: 'Event instrumentation', kind: 'task', group: 'Data', owner: 'Analytics', startOffset: 16, duration: 30, progress: 40 },
+      { title: 'Load testing', kind: 'task', group: 'Operations', owner: 'SRE', startOffset: 68, duration: 18, progress: 0 },
+      { title: 'Production handoff', kind: 'milestone', group: 'Operations', owner: 'Team', startOffset: 94, duration: 0, progress: 0 },
+    ],
+  },
+  {
+    id: 'milestone-map',
+    name: 'Milestone plan',
+    description: 'Make key decisions, reviews, and delivery dates visible.',
+    groups: ['Definition', 'Review', 'Delivery'],
+    items: [
+      { title: 'Scope agreed', kind: 'milestone', group: 'Definition', owner: 'Sponsor', startOffset: 0, duration: 0, progress: 0 },
+      { title: 'Detailed planning', kind: 'task', group: 'Definition', owner: 'Project lead', startOffset: 1, duration: 24, progress: 60 },
+      { title: 'Design review', kind: 'milestone', group: 'Review', owner: 'Steering group', startOffset: 35, duration: 0, progress: 0 },
+      { title: 'Build and validate', kind: 'task', group: 'Delivery', owner: 'Delivery team', startOffset: 36, duration: 44, progress: 0 },
+      { title: 'Acceptance review', kind: 'milestone', group: 'Review', owner: 'Stakeholders', startOffset: 88, duration: 0, progress: 0 },
+      { title: 'Go live', kind: 'milestone', group: 'Delivery', owner: 'Team', startOffset: 104, duration: 0, progress: 0 },
+    ],
+  },
+  {
+    id: 'blank',
+    name: 'Start from blank',
+    description: 'Create an empty timeline and shape it around your work.',
+    groups: [...GROUPS],
+    items: [],
+  },
+]
+
+export function getProjectDateRange(project: TimelineProject) {
+  const starts = [project.startDate, ...project.items.map((item) => item.startDate)]
+  const ends = [project.endDate, ...project.items.map((item) => item.endDate)]
+  return {
+    startDate: starts.reduce((left, right) => left < right ? left : right),
+    endDate: ends.reduce((left, right) => left > right ? left : right),
+  }
 }
 
 const DAY_MS = 86_400_000
@@ -57,6 +147,12 @@ export function startOfWeek(date: Date) {
   return addDays(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())), -weekday)
 }
 
+export function isoWeekNumber(date: Date) {
+  const thursday = addDays(startOfWeek(date), 3)
+  const firstWeek = startOfWeek(new Date(Date.UTC(thursday.getUTCFullYear(), 0, 4)))
+  return Math.floor(daysBetween(firstWeek, startOfWeek(date)) / 7) + 1
+}
+
 export function daysBetween(start: Date, end: Date) {
   const startUtc = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())
   const endUtc = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate())
@@ -80,7 +176,7 @@ function timestamp() {
 export function createBlankProject(name = 'Untitled timeline'): TimelineProject {
   const now = todayAsDate()
   const rangeStart = addMonths(startOfMonth(now), -1)
-  const rangeEnd = addMonths(startOfMonth(now), 5)
+  const rangeEnd = addDays(addMonths(startOfMonth(now), 5), -1)
   const createdAt = timestamp()
   return {
     version: 1,
@@ -90,38 +186,42 @@ export function createBlankProject(name = 'Untitled timeline'): TimelineProject 
     endDate: rangeEnd.toISOString().slice(0, 10),
     groups: [...GROUPS],
     items: [],
+    templateId: 'blank',
+    createdAt,
+    updatedAt: createdAt,
+  }
+}
+
+export function createProjectFromTemplate(templateId: TimelineTemplateId): TimelineProject {
+  const template = TIMELINE_TEMPLATES.find((entry) => entry.id === templateId) ?? TIMELINE_TEMPLATES[0]
+  const now = todayAsDate()
+  const month = startOfMonth(now)
+  const start = addMonths(month, -1)
+  const end = addDays(addMonths(month, 5), -1)
+  const at = (offset: number) => addDays(month, offset).toISOString().slice(0, 10)
+  const items = template.items.map(({ startOffset, duration, ...item }) => ({
+    ...item,
+    id: createId(),
+    startDate: at(startOffset),
+    endDate: at(startOffset + duration),
+  }))
+  const createdAt = timestamp()
+  return {
+    version: 1,
+    id: createId(),
+    name: template.id === 'blank' ? 'Untitled timeline' : template.name,
+    startDate: start.toISOString().slice(0, 10),
+    endDate: end.toISOString().slice(0, 10),
+    groups: [...template.groups],
+    items,
+    templateId: template.id,
     createdAt,
     updatedAt: createdAt,
   }
 }
 
 export function createSampleProject(): TimelineProject {
-  const now = todayAsDate()
-  const month = startOfMonth(now)
-  const start = addMonths(month, -1)
-  const end = addMonths(month, 5)
-  const at = (offset: number) => addDays(month, offset).toISOString().slice(0, 10)
-  const items: Omit<TimelineItem, 'id'>[] = [
-    { title: 'Customer interviews', kind: 'task', group: 'Research', owner: 'Jordan Lee', startDate: at(-17), endDate: at(-7), progress: 100 },
-    { title: 'Product direction', kind: 'task', group: 'Research', owner: 'Maya K.', startDate: at(-8), endDate: at(11), progress: 100 },
-    { title: 'Experience prototype', kind: 'task', group: 'Design', owner: 'Maya K.', startDate: at(4), endDate: at(27), progress: 72 },
-    { title: 'Build the core', kind: 'task', group: 'Engineering', owner: 'Alex Chen', startDate: at(20), endDate: at(68), progress: 43 },
-    { title: 'Private beta', kind: 'task', group: 'Launch', owner: 'Jordan Lee', startDate: at(54), endDate: at(82), progress: 18 },
-    { title: 'Release readiness', kind: 'milestone', group: 'Launch', owner: 'Team', startDate: at(85), endDate: at(85), progress: 0 },
-    { title: 'Public launch', kind: 'milestone', group: 'Launch', owner: 'Team', startDate: at(106), endDate: at(106), progress: 0 },
-  ]
-  const createdAt = timestamp()
-  return {
-    version: 1,
-    id: createId(),
-    name: 'Product launch plan',
-    startDate: start.toISOString().slice(0, 10),
-    endDate: end.toISOString().slice(0, 10),
-    groups: [...GROUPS],
-    items: items.map((item) => ({ ...item, id: createId() })),
-    createdAt,
-    updatedAt: createdAt,
-  }
+  return createProjectFromTemplate('product-launch')
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -164,6 +264,7 @@ export function parseImportedProject(value: unknown): TimelineProject {
     endDate: value.endDate,
     groups: [...new Set(groups)],
     items,
+    ...(TIMELINE_TEMPLATES.some((template) => template.id === value.templateId) ? { templateId: value.templateId as TimelineTemplateId } : {}),
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : timestamp(),
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : timestamp(),
   }
@@ -193,8 +294,9 @@ export function buildTimelineSvg(project: TimelineProject) {
   const top = 132
   const rowHeight = 72
   const height = top + project.items.length * rowHeight + 56
-  const start = getDate(project.startDate)
-  const end = addDays(getDate(project.endDate), 1)
+  const projectRange = getProjectDateRange(project)
+  const start = getDate(projectRange.startDate)
+  const end = addDays(getDate(projectRange.endDate), 1)
   const total = Math.max(1, daysBetween(start, end))
   const plotWidth = width - left - right
   const items = [...project.items].sort((a, b) => a.startDate.localeCompare(b.startDate))
