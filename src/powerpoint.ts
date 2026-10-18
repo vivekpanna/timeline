@@ -1,13 +1,11 @@
 import pptxgen from 'pptxgenjs'
-import { addDays, daysBetween, formatDate, getDate, getProjectDateRange, type TimelineProject } from './timeline'
+import { addDays, daysBetween, formatDate, getDate, getProjectDateRange, getTimelineGroupColors, type TimelineProject } from './timeline'
 
-const COLORS = ['5F947B', '5487A4', 'C79339', 'CE765F', '718A65', '8C739C']
-const LIGHT_COLORS = ['E4EEE8', 'E5EEF2', 'F5EDD9', 'F5E7E2', 'EAEFE4', 'EEE8F1']
 const ROWS_PER_SLIDE = 11
 
 function colorForGroup(project: TimelineProject, group: string) {
-  const index = Math.max(0, project.groups.indexOf(group)) % COLORS.length
-  return { main: COLORS[index], light: LIGHT_COLORS[index] }
+  const colors = getTimelineGroupColors(project.groups, group, project.design)
+  return { main: colors.main.slice(1).toUpperCase(), light: colors.light.slice(1).toUpperCase() }
 }
 
 export async function exportProjectToPptx(project: TimelineProject, fileName: string) {
@@ -34,7 +32,10 @@ export async function exportProjectToPptx(project: TimelineProject, fileName: st
     const groupOrder = project.groups.indexOf(left.group) - project.groups.indexOf(right.group)
     return groupOrder || left.startDate.localeCompare(right.startDate) || left.title.localeCompare(right.title)
   })
-  const pageCount = Math.max(1, Math.ceil(sortedItems.length / ROWS_PER_SLIDE))
+  const groupedLayout = project.layout === 'swimlane' || project.layout === 'portfolio' || project.layout === 'roadmap'
+  const quarterView = project.layout === 'roadmap' || project.layout === 'portfolio'
+  const itemsPerSlide = groupedLayout ? 7 : ROWS_PER_SLIDE
+  const pageCount = Math.max(1, Math.ceil(sortedItems.length / itemsPerSlide))
 
   for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
     const slide = pptx.addSlide()
@@ -61,13 +62,15 @@ export async function exportProjectToPptx(project: TimelineProject, fileName: st
     })
 
     const monthCount = (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth() + 1
-    const monthStep = Math.max(1, Math.ceil(monthCount / 8))
-    let tick = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1))
-    if (tick < start) tick = new Date(Date.UTC(tick.getUTCFullYear(), tick.getUTCMonth() + monthStep, 1))
+    const monthStep = quarterView ? 3 : Math.max(1, Math.ceil(monthCount / 8))
+    let tick = new Date(Date.UTC(start.getUTCFullYear(), quarterView ? Math.floor(start.getUTCMonth() / 3) * 3 : start.getUTCMonth(), 1))
+    if (tick < start && !quarterView) tick = new Date(Date.UTC(tick.getUTCFullYear(), tick.getUTCMonth() + monthStep, 1))
     while (tick < end) {
-      const x = chartX + (daysBetween(start, tick) / totalDays) * chartWidth
+      const rawX = chartX + (daysBetween(start, tick) / totalDays) * chartWidth
+      const x = quarterView ? Math.max(chartX, rawX) : rawX
       if (x >= chartX && x <= chartX + chartWidth) {
-        slide.addText(formatDate(tick, monthCount > 24 ? { month: 'short', year: '2-digit' } : { month: 'short', year: 'numeric' }), {
+        const label = quarterView ? `Q${Math.floor(tick.getUTCMonth() / 3) + 1} ${tick.getUTCFullYear()}` : formatDate(tick, monthCount > 24 ? { month: 'short', year: '2-digit' } : { month: 'short', year: 'numeric' })
+        slide.addText(label, {
           x: Math.min(x + 0.04, chartX + chartWidth - 0.83), y: 1.62, w: 0.8, h: 0.22,
           fontFace: 'Aptos', fontSize: 8, color: '718078', margin: 0,
         })
@@ -79,7 +82,7 @@ export async function exportProjectToPptx(project: TimelineProject, fileName: st
       tick = new Date(Date.UTC(tick.getUTCFullYear(), tick.getUTCMonth() + monthStep, 1))
     }
 
-    const pageItems = sortedItems.slice(pageIndex * ROWS_PER_SLIDE, (pageIndex + 1) * ROWS_PER_SLIDE)
+    const pageItems = sortedItems.slice(pageIndex * itemsPerSlide, (pageIndex + 1) * itemsPerSlide)
     if (pageItems.length === 0) {
       slide.addText('Add tasks and milestones to build your timeline.', {
         x: 0.54, y: 2.55, w: 6.5, h: 0.35,
@@ -87,8 +90,25 @@ export async function exportProjectToPptx(project: TimelineProject, fileName: st
       })
     }
 
-    pageItems.forEach((item, rowIndex) => {
-      const y = tableTop + rowIndex * rowHeight
+    let renderedRow = 0
+    let currentGroup = ''
+    pageItems.forEach((item) => {
+      if (groupedLayout && item.group !== currentGroup) {
+        const laneY = tableTop + renderedRow * rowHeight
+        const { main: laneColor } = colorForGroup(project, item.group)
+        slide.addShape(pptx.ShapeType.rect, {
+          x: 0.52, y: laneY + 0.04, w: 12.28, h: 0.3,
+          fill: { color: laneColor }, line: { color: laneColor, transparency: 100 },
+        })
+        slide.addText(item.group, {
+          x: 0.65, y: laneY + 0.11, w: 2.6, h: 0.12,
+          fontFace: 'Aptos', fontSize: 8, bold: true, color: 'FFFFFF', margin: 0,
+        })
+        currentGroup = item.group
+        renderedRow += 1
+      }
+      const y = tableTop + renderedRow * rowHeight
+      renderedRow += 1
       const { main, light } = colorForGroup(project, item.group)
       const startX = chartX + (daysBetween(start, getDate(item.startDate)) / totalDays) * chartWidth
       const duration = Math.max(1, daysBetween(getDate(item.startDate), addDays(getDate(item.endDate), 1)))
