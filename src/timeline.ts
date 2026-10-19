@@ -2,6 +2,7 @@ export const GROUPS = ['Research', 'Design', 'Engineering', 'Launch'] as const
 export type ItemKind = 'task' | 'milestone'
 export type TimelineTemplateId = string
 export type TimelineLayout = 'timeline' | 'roadmap' | 'swimlane' | 'portfolio' | 'milestones' | 'event'
+export type TimelinePresentation = 'timeline' | 'roadmap' | 'swimlane'
 export const TEMPLATE_CATEGORIES = ['Project delivery', 'Product roadmaps', 'Program management', 'IT & infrastructure', 'Software & product', 'Marketing & growth', 'Events', 'Research & trials'] as const
 export type TemplateCategory = typeof TEMPLATE_CATEGORIES[number]
 export type TimelineDesign = 'classic' | 'colorful' | 'minimal'
@@ -45,6 +46,7 @@ export interface TimelineProject {
   name: string
   design: TimelineDesign
   layout?: TimelineLayout
+  presentation?: TimelinePresentation
   startDate: string
   endDate: string
   groups: string[]
@@ -75,6 +77,13 @@ export function getTimelineGroupColors(groups: string[], group: string, design: 
   const fallbackIndex = [...group].reduce((total, character) => total + character.charCodeAt(0), 0)
   const index = (groupIndex < 0 ? fallbackIndex : groupIndex) % palette.main.length
   return { main: palette.main[index], light: palette.light[index] }
+}
+
+export function getProjectPresentation(project: Pick<TimelineProject, 'layout' | 'presentation'>): TimelinePresentation {
+  if (project.presentation) return project.presentation
+  if (project.layout === 'roadmap' || project.layout === 'portfolio') return 'roadmap'
+  if (project.layout === 'swimlane') return 'swimlane'
+  return 'timeline'
 }
 
 const BASE_TIMELINE_TEMPLATES: Omit<TimelineTemplate, 'category'>[] = [
@@ -419,6 +428,7 @@ export function createBlankProject(name = 'Untitled timeline'): TimelineProject 
     name,
     design: DEFAULT_TIMELINE_DESIGN,
     layout: 'timeline',
+    presentation: 'timeline',
     startDate: rangeStart.toISOString().slice(0, 10),
     endDate: rangeEnd.toISOString().slice(0, 10),
     groups: [...GROUPS],
@@ -453,6 +463,7 @@ export function createProjectFromTemplate(templateId: TimelineTemplateId): Timel
     name: template.id === 'blank' ? 'Untitled timeline' : template.name,
     design: DEFAULT_TIMELINE_DESIGN,
     layout: template.layout,
+    presentation: getProjectPresentation({ layout: template.layout }),
     startDate: start.toISOString().slice(0, 10),
     endDate: end.toISOString().slice(0, 10),
     groups: [...template.groups],
@@ -501,12 +512,17 @@ export function parseImportedProject(value: unknown): TimelineProject {
   if (groups.length !== value.groups.length) throw new Error('A workstream name is invalid.')
   const template = TIMELINE_TEMPLATES.find((entry) => entry.id === value.templateId)
   const layouts: TimelineLayout[] = ['timeline', 'roadmap', 'swimlane', 'portfolio', 'milestones', 'event']
+  const layout = layouts.includes(value.layout as TimelineLayout) ? value.layout as TimelineLayout : template?.layout ?? 'timeline'
+  const presentation = value.presentation === 'timeline' || value.presentation === 'roadmap' || value.presentation === 'swimlane'
+    ? value.presentation
+    : getProjectPresentation({ layout })
   return {
     version: 1,
     id: value.id,
     name: value.name.trim() || 'Imported timeline',
     design: value.design === 'classic' || value.design === 'colorful' || value.design === 'minimal' ? value.design : DEFAULT_TIMELINE_DESIGN,
-    layout: layouts.includes(value.layout as TimelineLayout) ? value.layout as TimelineLayout : template?.layout ?? 'timeline',
+    layout,
+    presentation,
     startDate: value.startDate,
     endDate: value.endDate,
     groups: [...new Set(groups)],
@@ -555,8 +571,9 @@ export function buildTimelineSvg(project: TimelineProject) {
   const total = Math.max(1, daysBetween(start, end))
   const plotWidth = width - left - right
   const items = [...project.items].sort((a, b) => a.startDate.localeCompare(b.startDate))
-  const grouped = project.layout === 'swimlane' || project.layout === 'portfolio' || project.layout === 'roadmap'
-  const quarterView = project.layout === 'roadmap' || project.layout === 'portfolio'
+  const presentation = getProjectPresentation(project)
+  const grouped = presentation === 'swimlane' || presentation === 'roadmap'
+  const quarterView = presentation === 'roadmap'
   const laneGroups = [...new Set([...project.groups, ...items.map((item) => item.group)])].filter((group) => items.some((item) => item.group === group))
   const height = top + project.items.length * rowHeight + (grouped ? laneGroups.length * 38 : 0) + 56
   const ticks: string[] = []

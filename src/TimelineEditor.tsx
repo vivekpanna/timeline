@@ -39,6 +39,7 @@ import {
   getDate,
   getTimelineGroupColors,
   getProjectDateRange,
+  getProjectPresentation,
   GROUPS,
   GALLERY_TEMPLATES,
   isoWeekNumber,
@@ -49,6 +50,7 @@ import {
   TIMELINE_DESIGNS,
   type TimelineItem,
   type TimelineDesign,
+  type TimelinePresentation,
   type TemplateCategory,
   type TimelineProject,
   type TimelineTemplate,
@@ -690,7 +692,8 @@ export default function TimelineEditor() {
 
   const visibleItems = [...activeProject.items].sort((a, b) => a.startDate.localeCompare(b.startDate) || a.title.localeCompare(b.title))
   const layout = activeProject.layout ?? 'timeline'
-  const sectionedLayout = layout === 'swimlane' || layout === 'portfolio' || layout === 'roadmap'
+  const presentation = getProjectPresentation(activeProject)
+  const sectionedLayout = presentation === 'swimlane' || presentation === 'roadmap'
 
   function renderTimelineItem(item: TimelineItem) {
     const color = getTimelineGroupColors(activeProject.groups, item.group, activeProject.design)
@@ -760,6 +763,7 @@ export default function TimelineEditor() {
           <section className={`editor-panel ${viewMode === 'data' ? 'data-mode' : ''}`} aria-label="Timeline editor">
             <div className="editor-toolbar">
               <div className="view-switch" role="group" aria-label="Editor view"><button className={viewMode === 'timeline' ? 'selected' : ''} type="button" onClick={() => setViewMode('timeline')}><AlignLeft size={15} /> Timeline</button><button className={viewMode === 'gantt' ? 'selected' : ''} type="button" onClick={() => setViewMode('gantt')}><ChartGantt size={16} /> Gantt</button><button className={viewMode === 'data' ? 'selected' : ''} type="button" onClick={() => setViewMode('data')}><FileSpreadsheet size={15} /> Data</button></div>
+              <label className="presentation-select"><span>COMPOSITION</span><select aria-label="Timeline composition" value={presentation} onChange={(event) => updateActive((project) => ({ ...project, presentation: event.target.value as TimelinePresentation }))}><option value="timeline">Timeline</option><option value="roadmap">Roadmap</option><option value="swimlane">Swimlane</option></select></label>
               {viewMode !== 'data' && <><div className="toolbar-divider" />
                 <div className="scale-switch" role="group" aria-label="Time scale"><button className={scale === 'week' ? 'selected' : ''} type="button" onClick={() => setScale('week')}>Week</button><button className={scale === 'month' ? 'selected' : ''} type="button" onClick={() => setScale('month')}>Month</button></div>
                 <div className="toolbar-spacer" />
@@ -773,11 +777,11 @@ export default function TimelineEditor() {
             </div>
 
             {viewMode === 'data' && <SpreadsheetGrid items={activeProject.items} groups={groups} message={gridMessage} onCommit={saveGridItem} onPaste={pasteGridItems} onAdd={addGridItem} onDetails={setDialogItem} />}
-            <div className="timeline-scroll"><div className="timeline-grid" data-design={activeProject.design} data-layout={layout} style={{ '--chart-width': `${chartWidth}px`, '--unit-width': `${unitWidth}px` } as CSSProperties}>
+            <div className="timeline-scroll"><div className="timeline-grid" data-design={activeProject.design} data-layout={layout} data-presentation={presentation} style={{ '--chart-width': `${chartWidth}px`, '--unit-width': `${unitWidth}px` } as CSSProperties}>
               <div className="task-head"><span>WORKSTREAM / OWNER</span></div>
               <div className="chart-head"><div className="periods-row" style={{ width: chartWidth }}>{periods.map((period, index) => {
                 const quarterStart = index === 0 || period.start.getUTCMonth() % 3 === 0
-                const quarterView = (layout === 'roadmap' || layout === 'portfolio') && scale === 'month'
+                const quarterView = presentation === 'roadmap' && scale === 'month'
                 return <div className={`period-cell ${quarterView ? 'quarter-cell' : ''}`} key={`${period.start.toISOString()}-${index}`}><strong>{quarterView ? quarterStart ? `Q${Math.floor(period.start.getUTCMonth() / 3) + 1}` : '' : period.label}</strong><small>{quarterView ? quarterStart ? String(period.start.getUTCFullYear()) : '' : period.sublabel}</small></div>
               })}</div></div>
               <div className="task-rows">
@@ -785,7 +789,7 @@ export default function TimelineEditor() {
                   const laneItems = visibleItems.filter((item) => item.group === group)
                   if (laneItems.length === 0) return []
                   const colors = getTimelineGroupColors(activeProject.groups, group, activeProject.design)
-                  return [<div className={`lane-heading lane-heading-${layout}`} key={`lane-${group}`} style={{ '--group-color': colors.main, '--group-tint': colors.light } as CSSProperties}><strong>{group}</strong><span>{laneItems.length} items</span></div>, ...laneItems.map(renderTimelineItem)]
+                  return [<div className={`lane-heading lane-heading-${presentation}`} key={`lane-${group}`} style={{ '--group-color': colors.main, '--group-tint': colors.light } as CSSProperties}><strong>{group}</strong><span>{laneItems.length} items</span></div>, ...laneItems.map(renderTimelineItem)]
                 }) : visibleItems.map(renderTimelineItem)}
                 {visibleItems.length > 0 && <div className="add-row"><button type="button" className="add-row-main" onClick={() => setDialogItem(makeDraft(activeProject, 'task'))}><span className="add-row-plus">+</span> Add a task</button><span className="add-row-hint">or add a <button type="button" className="inline-link" onClick={() => setDialogItem(makeDraft(activeProject, 'milestone'))}>milestone</button></span></div>}
               </div>

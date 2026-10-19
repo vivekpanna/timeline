@@ -149,7 +149,7 @@ function parseRows(rows: ImportCell[][], fileName: string, date1904 = false, exc
   const name = fileName.replace(/\.(csv|xlsx|xlsm)$/i, '').replace(/[_-]+/g, ' ').trim() || 'Imported timeline'
   const createdAt = new Date().toISOString()
 
-  return { version: 1, id: createId(), name, design: 'classic', startDate, endDate, groups, items, createdAt, updatedAt: createdAt }
+  return { version: 1, id: createId(), name, design: 'classic', layout: 'timeline', presentation: 'timeline', startDate, endDate, groups, items, createdAt, updatedAt: createdAt }
 }
 
 function detectDelimiter(text: string) {

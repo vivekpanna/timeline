@@ -1,5 +1,5 @@
 import pptxgen from 'pptxgenjs'
-import { addDays, daysBetween, formatDate, getDate, getProjectDateRange, getTimelineGroupColors, type TimelineProject } from './timeline'
+import { addDays, daysBetween, formatDate, getDate, getProjectDateRange, getProjectPresentation, getTimelineGroupColors, type TimelineProject } from './timeline'
 
 const ROWS_PER_SLIDE = 11
 
@@ -28,12 +28,13 @@ export async function exportProjectToPptx(project: TimelineProject, fileName: st
   const chartWidth = 9.48
   const tableTop = 2.02
   const rowHeight = 0.42
+  const presentation = getProjectPresentation(project)
+  const groupedLayout = presentation === 'swimlane' || presentation === 'roadmap'
+  const quarterView = presentation === 'roadmap'
   const sortedItems = [...project.items].sort((left, right) => {
-    const groupOrder = project.groups.indexOf(left.group) - project.groups.indexOf(right.group)
+    const groupOrder = groupedLayout ? project.groups.indexOf(left.group) - project.groups.indexOf(right.group) : 0
     return groupOrder || left.startDate.localeCompare(right.startDate) || left.title.localeCompare(right.title)
   })
-  const groupedLayout = project.layout === 'swimlane' || project.layout === 'portfolio' || project.layout === 'roadmap'
-  const quarterView = project.layout === 'roadmap' || project.layout === 'portfolio'
   const itemsPerSlide = groupedLayout ? 7 : ROWS_PER_SLIDE
   const pageCount = Math.max(1, Math.ceil(sortedItems.length / itemsPerSlide))
 
