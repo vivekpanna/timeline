@@ -5,6 +5,7 @@ import {
   CalendarDays,
   ChartGantt,
   Check,
+  ChevronLeft,
   ChevronDown,
   ChevronRight,
   CircleHelp,
@@ -57,6 +58,7 @@ import {
   type TimelineTemplateId,
 } from './timeline'
 import './TimelineEditor.css'
+import './TimelineLibrary.css'
 
 const STORAGE_KEY = 'daymark.projects.v1'
 const ACTIVE_KEY = 'daymark.active-project.v1'
@@ -423,6 +425,82 @@ function TemplatePicker({ onClose, onSelect, onImport, onBlank }: { onClose: () 
   </div>
 }
 
+function ProjectPreview({ project }: { project: TimelineProject }) {
+  const presentation = getProjectPresentation(project)
+  const range = getProjectDateRange(project)
+  const start = getDate(range.startDate)
+  const totalDays = Math.max(1, daysBetween(start, addDays(getDate(range.endDate), 1)))
+  const items = [...project.items].sort((left, right) => left.startDate.localeCompare(right.startDate)).slice(0, 8)
+  const visibleGroups = presentation === 'timeline'
+    ? ['']
+    : project.groups.filter((group) => items.some((item) => item.group === group)).slice(0, 3)
+
+  return <div className={`library-preview library-preview-${presentation}`} aria-hidden="true">
+    <div className="library-preview-axis"><span>{formatDate(start, { month: 'short', year: '2-digit' })}</span><span>{formatDate(addDays(start, totalDays - 1), { month: 'short', year: '2-digit' })}</span></div>
+    <div className="library-preview-chart">
+      {visibleGroups.map((group) => <div className="library-preview-lane" key={group || 'timeline'}>
+        {group && <span className="library-preview-lane-label">{group}</span>}
+        <span className="library-preview-bars">{items.filter((item) => !group || item.group === group).slice(0, 3).map((item) => {
+          const color = getTimelineGroupColors(project.groups, item.group, project.design).main
+          const left = Math.max(0, Math.min(96, daysBetween(start, getDate(item.startDate)) / totalDays * 100))
+          const width = item.kind === 'milestone' ? 1.7 : Math.max(5, Math.min(55, daysBetween(getDate(item.startDate), addDays(getDate(item.endDate), 1)) / totalDays * 100))
+          return <i key={item.id} className={item.kind === 'milestone' ? 'library-preview-milestone' : ''} style={{ left: `${left}%`, width: `${width}%`, '--preview-color': color } as CSSProperties} />
+        })}</span>
+      </div>)}
+    </div>
+  </div>
+}
+
+function TimelineLibrary({
+  projects,
+  onOpen,
+  onNew,
+  onImport,
+}: {
+  projects: TimelineProject[]
+  onOpen: (projectId: string) => void
+  onNew: () => void
+  onImport: () => void
+}) {
+  const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<'recent' | 'oldest' | 'name'>('recent')
+  const normalizedSearch = search.trim().toLowerCase()
+  const visibleProjects = projects
+    .filter((project) => project.name.toLowerCase().includes(normalizedSearch))
+    .sort((left, right) => sort === 'name'
+      ? left.name.localeCompare(right.name)
+      : sort === 'oldest'
+        ? left.updatedAt.localeCompare(right.updatedAt)
+        : right.updatedAt.localeCompare(left.updatedAt))
+
+  return <div className="library-shell">
+    <aside className="library-sidebar">
+      <div className="brand-lockup"><span className="brand-mark"><ChartGantt size={19} strokeWidth={2.3} /></span><span className="brand-name">daymark<span>.</span></span><span className="free-tag">FREE</span></div>
+      <div className="library-workspace-label">YOUR WORKSPACE</div>
+      <button className="library-nav-item active" type="button"><ChartGantt size={16} /><span>My timelines</span><small>{projects.length}</small></button>
+      <button className="library-new-button" type="button" onClick={onNew}><Plus size={17} /> New timeline</button>
+      <div className="library-sidebar-bottom"><span className="library-storage-icon"><LockKeyhole size={15} /></span><div><strong>Private workspace</strong><small>Saved on this device</small></div></div>
+    </aside>
+    <main className="library-main">
+      <header className="library-topbar"><span><span className="library-status-dot" /> LOCAL WORKSPACE</span><button className="button secondary" type="button" onClick={onImport}><Upload size={15} /> Import</button></header>
+      <section className="library-content">
+        <div className="library-heading"><div><span className="eyebrow"><span className="eyebrow-line" /> WORKSPACE</span><h1>My timelines</h1><p>{projects.length} {projects.length === 1 ? 'plan' : 'plans'} saved on this device</p></div><button className="button primary library-create-button" type="button" onClick={onNew}><Plus size={16} /> New timeline</button></div>
+        <div className="library-quick-actions"><button type="button" onClick={onNew}><FolderPlus size={16} /><span><strong>Start from a template</strong><small>Browse the full gallery</small></span><ChevronRight size={15} /></button><button type="button" onClick={onImport}><FileSpreadsheet size={16} /><span><strong>Import a plan</strong><small>CSV, Excel, or Daymark JSON</small></span><ChevronRight size={15} /></button></div>
+        <div className="library-toolbar"><label className="library-search"><Search size={16} /><input type="search" aria-label="Search timelines" placeholder="Search timelines" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button type="button" aria-label="Clear search" onClick={() => setSearch('')}><X size={14} /></button>}</label><label className="library-sort"><span>Sort</span><select aria-label="Sort timelines" value={sort} onChange={(event) => setSort(event.target.value as 'recent' | 'oldest' | 'name')}><option value="recent">Recently updated</option><option value="oldest">Oldest updated</option><option value="name">Name</option></select></label></div>
+        <div className="library-results-head"><h2>{search ? 'Search results' : 'Recent timelines'}</h2><span>{visibleProjects.length} {visibleProjects.length === 1 ? 'plan' : 'plans'}</span></div>
+        {visibleProjects.length > 0 ? <div className="library-project-grid">{visibleProjects.map((project) => {
+          const groupCount = new Set(project.items.map((item) => item.group)).size
+          return <button className="library-project-card" type="button" key={project.id} onClick={() => onOpen(project.id)}>
+            <ProjectPreview project={project} />
+            <span className="library-card-copy"><strong>{project.name || 'Untitled timeline'}</strong><span>{project.items.length} items <i /> {groupCount} workstreams</span><small><Clock3 size={12} /> Updated {formatDate(project.updatedAt.slice(0, 10), { month: 'short', day: 'numeric', year: 'numeric' })}</small></span>
+            <ChevronRight className="library-card-arrow" size={16} />
+          </button>
+        })}</div> : <div className="library-empty"><Search size={19} /><strong>No matching timelines</strong><span>Try a different name or clear your search.</span></div>}
+      </section>
+    </main>
+  </div>
+}
+
 function ImportDialog({
   error,
   loading,
@@ -469,6 +547,7 @@ export default function TimelineEditor() {
   })
   const [projects, setProjects] = useState(initial.projects)
   const [activeId, setActiveId] = useState(initial.activeId)
+  const [screen, setScreen] = useState<'library' | 'editor'>('library')
   const [scale, setScale] = useState<Scale>('month')
   const [viewMode, setViewMode] = useState<ViewMode>('gantt')
   const [dialogItem, setDialogItem] = useState<TimelineItem | ItemDraft | null>(null)
@@ -514,7 +593,13 @@ export default function TimelineEditor() {
     const project = createProjectFromTemplate(templateId)
     commitProjects([project, ...projects])
     setActiveId(project.id)
+    setScreen('editor')
     setTemplateOpen(false)
+  }
+
+  function openProject(projectId: string) {
+    setActiveId(projectId)
+    setScreen('editor')
   }
 
   function deleteProject(projectId: string) {
@@ -682,6 +767,7 @@ export default function TimelineEditor() {
       }
       commitProjects([imported, ...projects])
       setActiveId(imported.id)
+      setScreen('editor')
       setImportOpen(false)
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'This file could not be imported.')
@@ -707,6 +793,12 @@ export default function TimelineEditor() {
     </button>
   }
 
+  if (screen === 'library') return <>
+    <TimelineLibrary projects={projects} onOpen={openProject} onNew={() => setTemplateOpen(true)} onImport={() => { setImportError(''); setImportOpen(true) }} />
+    {templateOpen && <TemplatePicker onClose={() => setTemplateOpen(false)} onSelect={createProjectFromGallery} onImport={() => { setTemplateOpen(false); setImportError(''); setImportOpen(true) }} onBlank={() => createProjectFromGallery('blank')} />}
+    {importOpen && <ImportDialog error={importError} loading={importing} onClose={() => setImportOpen(false)} onSelect={(file) => { void importProject(file) }} onDownloadTemplate={() => saveBlob('daymark-csv-template.csv', buildCsvTemplate(), 'text/csv;charset=utf-8')} />}
+  </>
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -727,7 +819,7 @@ export default function TimelineEditor() {
 
       <main className="main-area">
         <header className="topbar">
-          <div className="crumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{activeProject.name}</strong></div>
+          <div className="editor-breadcrumb"><button className="library-back" type="button" onClick={() => setScreen('library')}><ChevronLeft size={15} /> My timelines</button><div className="crumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{activeProject.name}</strong></div></div>
           <div className="topbar-actions">
             <span className={`save-indicator ${saveError ? 'save-error' : ''}`}><span />{saveError ? 'Storage limit reached' : 'All changes saved'}</span>
             <button className="button secondary import-button" type="button" onClick={() => { setImportError(''); setImportOpen(true) }}><Upload size={15} /> Import</button>
